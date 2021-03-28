@@ -1,0 +1,251 @@
+---
+title: "Лабораторная работа 2"
+author: "Дымнич Алексей"
+date: "28 03 2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Вариант - 7
+
+Задача:
+
+Упражнение выполняется по вариантам. В каждом варианте необходимо построить два графика  средствами  указанной  графической  системы  и  сохранить  их  в  формат png. Результат  выполнения  упражнения –скрипт  с  расширением .Rmdс  кодом  на  языке RMarkdown, который описывает все этапы построения графика, от загрузки данных до записи графика, а также два графических файла. Файлы скрипта и графики разместить в репозитории на github.com, ссылку выслать на почту преподавателя. Номер варианта –номер в списке группы.
+
+Первый график постройте на данных по импорту продовольственных товаров в РФ в графической  системе ggplot2.  Данные  за  период  с  января  2010  по  декабрь  2020  гг. необходимо загрузить из базы данных международной торговли UN COMTRADE, как было показано  в  практиках  1-2.  Нас  интересует  эффект  от  введения  продовольственных санкций.
+
+Второй график постройте на данных, собранных в упражнении No1, в графической системе lattice.  Тип  графика  может  быть  любым,  при  этом  обязательно  должна присутствовать разбивка по категориям (например: годы, производители товара, жанры фильмов).
+
+Товар: лук, лук-шалот, чеснок, лук-порей и т.д. в свежем или охлажденном виде, код 0703. График: разброс массы поставки в зависимости от её стоимости, разбить на три фасетки: январь 2010 -август 2014 г., сентябрь 2014 –декабрь 2018 гг., январь 2019 –декабрь 2020. Добавить горизонтальные прямые на уровне медианы массы поставок. Пропуски заменить на средние.
+
+# Первый график
+```{r}
+# Библиотека для работы с JSON
+library('rjson')
+# Адрес справочника по странам UN COMTRADE
+fileURL <- "http://comtrade.un.org/data/cache/partnerAreas.json"
+#Загрузка данных из формата JSON
+reporters <- fromJSON(file = fileURL)
+is.list(reporters)
+
+# Соединяем элементы списка построчно
+reporters <- t(sapply(reporters$results, rbind))
+dim(reporters)
+
+# Превращаем в DataFrame
+reporters <- as.data.frame(reporters)
+head(reporters)
+
+# Код Россиийской Федерации
+names(reporters) <- c('State.Code', 'State.Name.En')
+reporters[reporters$State.Name.En == "Russian Federation", ]$State.Code
+
+# Код России: 643, воспользуемся им в дальнейшем
+
+# функция, реализующая API (источник: UN COMTRADE)
+source("https://raw.githubusercontent.com/aksyuk/R-data/master/API/comtrade_API.R")
+
+# Выгружаем данные
+for (i in 2010:2020){
+  Sys.sleep(5)
+  s1 <- get.Comtrade(r = 'all', p = 643,
+                     ps = as.character(i), freq = "M",
+                     rg = '1', cc = '0703',
+                     fmt = 'csv')
+  # Имя файла для сохранения
+  file.name <- paste('./data/comtrade_', i, '.csv', sep = '')
+  # Запись данных в файл
+  write.csv(s1$data, file.name, row.names = F)
+  print(paste("Данные за", i, "год загружены в файл",file.name, "!"))
+  write(paste('Файл',
+              paste('comtrade_', i, '.csv', sep = ''),
+              'загржен', Sys.time()), file = './data/download.log', append=T)
+}
+```
+
+```{r}
+library('stringr')
+library('ggplot2')
+library('gridExtra')
+
+DF <- data.frame()
+
+# загружаем данные из файлов и сразу заменяем NA на средние значения
+for (i in 2010:2020){
+  df <- read.csv(paste('./data/comtrade_', i, '.csv', sep=''), header = T, sep = ',')
+  avg <- mean(df$Netweight..kg.[!is.na(df$Netweight..kg.)])
+  df[is.na(df)] <- avg
+  DF <- rbind(DF, df)
+}
+
+# Оставляем год, период, массу, стоимость
+DF <- DF[, c(2, 4, 30, 32)]
+DF
+
+# Фрейм для данных за янв 2010 - авг 2014
+df.1 <- data.frame()
+for (i in 2010:2014){
+  if(i == 2014){
+    for (m in month.name[1:8]){
+      df.1 <- rbind(df.1, DF[DF$Year == i & str_detect(DF$Period.Desc., m), ])
+    }
+  }else{
+    df.1 <- rbind(df.1, DF[DF$Year == i, ])
+  }
+}
+df.1 <- cbind(df.1, data.frame(Period = 'янв 2010 - авг 2014'))
+df.1
+
+# Фрейм для данных за сен 2014 - дек 2018
+df.2 <- data.frame()
+for (i in 2014:2018){
+  if(i == 2014){
+    for (m in month.name[9:12]){
+      df.2 <- rbind(df.2, DF[DF$Year == i & str_detect(DF$Period.Desc., m), ])
+    }
+  }else{
+    df.2 <- rbind(df.2, DF[DF$Year == i, ])
+  }
+}
+df.2 <- cbind(df.2, data.frame(Period = 'сен 2014 - дек 2018'))
+df.2
+
+df.3 <- data.frame()
+for (i in 2018:2020){
+  df.3 <- rbind(df.3, DF[DF$Year == i, ])
+}
+df.3 <- cbind(df.3, data.frame(Period = 'янв 2019 - дек 2020'))
+df.3
+
+df.period <- rbind(df.1, df.2, df.3)
+df.period
+
+png('ggplot_boxplot.png', width = 1000, height = 1000)
+ggplot(data = df.period, aes(x = Trade.Value..US.., y = Netweight..kg.)) +
+  geom_point() + facet_grid(. ~ Period) +
+  xlab('Масса поставок') + ylab('Стоимость') +
+  ggtitle('Зависимость массы поставки от ее стоимости') +
+  geom_hline(aes(yintercept = median(Netweight..kg.), group = Period), color = 'red')
+dev.off()
+```
+
+# Второй график
+```{r}
+library('rvest')
+
+# Ссылка на первую страницу с планшетами
+url.page.1 <- 'https://market.yandex.ru/catalog--planshety/18034185/list?cpa=0&hid=6427100&onstock=1&local-offers-first=0'
+# Ссылка на вторую страницу с планшетами
+url.page.2 <- 'https://market.yandex.ru/catalog--planshety/18034185/list?cpa=0&hid=6427100&onstock=1&page=2&local-offers-first=0' 
+
+webpage1 <- read_html(url.page.1)
+webpage2 <- read_html(url.page.2)
+
+# название планшета
+nazv.planshet <- c(webpage1 %>% html_nodes(".cLo1fZHm2y") %>% html_text, webpage2 %>% html_nodes(".cLo1fZHm2y") %>% html_text)
+
+# описание планшета
+opisanie.planshet <- c(webpage1 %>% html_nodes("._2_oj-OEI-o") %>% html_text, webpage2 %>% html_nodes("._2_oj-OEI-o") %>% html_text)
+
+# стоимость планшета
+cena.planshet <- c(webpage1 %>% html_nodes("._3f2ZtYT7NH") %>% html_text, webpage2 %>% html_nodes("._3f2ZtYT7NH") %>% html_text)
+
+
+cena.planshet <- as.numeric(gsub("[^[:digit:]]", "", cena.planshet))
+
+# функция перебора тегов внутри тегов более высокого уровня
+get_tags <- function(node){
+  # найти все теги с рейтингом
+  raw_data <- html_nodes(node, selector) %>% html_text
+  # значения нулевой длины меняем на пропуски
+  data_NAs <- ifelse(length(raw_data) == 0, NA, raw_data)
+}
+
+selector <- '._1iKHblnc3a'
+# рейтинг планшета
+rating.planshet <- c(sapply(html_nodes(webpage1, '._1B9w_GzQuM'), get_tags), sapply(html_nodes(webpage2, '._1B9w_GzQuM'), get_tags))
+rating.planshet <- as.numeric(rating.planshet)
+
+selector <- '.KdrkCVDrVm'
+
+# количество отзывов о планшете
+otzyv.planshet <- c(sapply(html_nodes(webpage1, '._1B9w_GzQuM'), get_tags), sapply(html_nodes(webpage2, '._1B9w_GzQuM'), get_tags))
+# Избавляемся от всего кроме чисел
+otzyv.planshet <- gsub("[^[:digit:]]", "", otzyv.planshet)
+# перевод в число
+otzyv.planshet <- as.numeric(otzyv.planshet)
+
+data.dir <- './data'
+
+# Создаём директорию для данных, если она ещё не существует:
+if (!file.exists(data.dir)) {
+  dir.create(data.dir)
+}
+
+# Создаём файл с логом загрузок, если он ещё не существует:
+log.filename <- './data/download.log'
+if (!file.exists(log.filename)) file.create(log.filename)
+
+DF <- data.frame(Nazv = nazv.planshet,
+                 Opisanie = opisanie.planshet,
+                 Cena = cena.planshet,
+                 Rating = rating.planshet,
+                 Otzyv = otzyv.planshet)
+
+DF
+
+# Записываем в .csv файл
+write.csv(DF, file = './data/planshety.csv', row.names = F)
+# запись в лог файл
+write(paste('Файл "planshety.csv" создан:', Sys.time()), 
+      file = log.filename, append = T)
+```
+
+```{r}
+library('lattice')
+library('dplyr')
+
+DF <- read.csv("./data/planshety.csv", header = T, sep = ',')
+
+# Вытягиваем из названия наименование производителя
+company <- array()
+split_name <- strsplit(as.character(DF$Nazv), " ")
+for (i in split_name){
+  # Берем второй элемент
+  company <- append(company, i[2])
+}
+
+# Считаем среднее значение рейтинга для заполнения пустых строк
+avg <- mean(DF$Rating[!is.na(DF$Rating)])
+DF[is.na(DF)] <- avg
+
+# Заполняем фрейм производителями
+DF <- cbind(DF, data.frame(Company = factor(company[2:97])))
+
+DF
+
+# Уникальные значения производителей
+unique.company <- unique(company[2:97])
+data.company <- data.frame(Company = character(), Num = numeric())
+# Считаем количество каждого производителя
+for (i in unique.company){
+  data.company <- rbind(data.company, data.frame(Company = i, Num = count(DF[DF$Company == i, ])))
+}
+# Оставляем 6 производителей с наибольшим количеством
+new.company <- data.company[order(-data.company$n), ][1:5, ]$Company
+new.company
+
+new.DF <- DF[DF$Company %in% new.company, ]
+new.DF
+
+# Разбиваем график на 6 фасеток (Company)
+png('lattice.png', width = 1000, height = 1000)
+xyplot(Cena ~ Rating | Company, data = new.DF, auto.key = list(space = 'right'),
+       ylab = 'Цена',
+       xlab = 'Рейтинг',
+       main = 'График разброса цены относительно рейтинга')
+dev.off()
+```
